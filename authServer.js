@@ -8,33 +8,40 @@ const jwt = require('jsonwebtoken')
 //json을 login route에 pass 해야함. server가 핸들링 할 수 있도록 등록
 app.use(express.json())
 
+let refreshTokens = [] //원래는 당연히 DB에 저장해야함
+
+app.delete('/logout', (req, res) => {
+    refreshTokens = refreshTokens.filter(token => token !== req.body.token)
+    res.sendStatus(204)
+})
+
+app.post('/token', (req, res) => {
+    const refreshToken = req.body.token
+    if (refreshToken == null) return res.sendStatus(401)
+    if (!refreshTokens.includes(refreshToken)) return res.sendStatus(403) //do we have vaild refresh token that exist in the DB?
+    jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET, (err, user) => {
+        if (err) return res.sendStatus(403)
+        const accessToken = generateAccessToken({name:user.name}) //user객체가 아니라 name을 전달해야함
+        res.json({ accessToken:accessToken })
+    })
+})
+
 app.post('/login', (req, res) => {
     // Authentificate User
     const username = req.body.username
     const user = {name: username}
     //serialize
-    const accessToken = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET)
-    res.json({accessToken: accessToken})
+    const accessToken = generateAccessToken(user)
+    const refreshToken = jwt.sign(user, process.env.REFRESH_TOKEN_SECRET) //일단 리프레시 토큰의 유효기간은 수동적으로 조작 
+    refreshTokens.push(refreshToken)
+    res.json({accessToken: accessToken, refreshToken:refreshToken})
 })
 
-function authenticateToken(req, res, next)  {
-    /* 
-    get the token that they send us
-    verify that this is the correct user
-    return that user into the other function to get post
-    */
-    // token is going to come from the header, header -> Bearer
-    const authHeader = req.headers['authorization']
-    const token = authHeader && authHeader.split(' ')[1] // -> having authHeader, return token portion from that. if not don't do anything
-    if (token == null) 
-        return res.sendStatus(401);
-    jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, user) => {
-        if (err)
-            return res.sendStatus(403)
-        req.user = user //adding a user property to the req(request) object. attach user information to the request object
-        next()
-    })
+function generateAccessToken(user) {
+    return jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {expiresIn: '30s'}) //실제 응용프로그램에선 좀 더 김(10분~30분)
 }
+
+
 
 const port = 4000
 app.listen(port, () => console.log(`listening on http://localhost:${port}`))
